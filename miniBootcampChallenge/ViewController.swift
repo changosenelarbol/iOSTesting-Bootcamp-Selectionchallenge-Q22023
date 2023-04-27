@@ -16,35 +16,126 @@ class ViewController: UICollectionViewController {
     }
     
     private lazy var urls: [URL] = URLProvider.urls
+    private var photos: [UIImage] = [] {
+        didSet {
+            DispatchQueue.main.async {
+                self.collectionView.reloadData()
+            }
+        }
+    }
     
     override func viewDidLoad() {
         super.viewDidLoad()
         title = Constants.title
+        
+        // MARK: - Here you can change between the two functions
+         
+        //loadPhotosWithoutFreezingUI()
+        
+        loadAllPhotosFirst()
     }
 
+    private func addLoader() -> UIActivityIndicatorView {
+        let loader: UIActivityIndicatorView = UIActivityIndicatorView(style: .large)
+        loader.isHidden = false
+        loader.backgroundColor = .white
+        loader.hidesWhenStopped = true
+        loader.center = self.view.center
+        self.view.addSubview(loader)
+        loader.startAnimating()
+        return loader
+    }
+    
+    // MARK: - Functions to create loading animation
+    private func setUpViewsForAnimation() {
+        self.view.backgroundColor = .white
+        self.collectionView.alpha = 0
+    }
+    
+    private func startViewsAnimation() {
+        UIView.animate(withDuration: 0.75, delay: 0) {
+            self.collectionView.alpha = 1
+        }
+    }
+
+    // MARK: - Functions to load photos
+    private func loadAllPhotosFirst() {
+        setUpViewsForAnimation()
+        let loader = addLoader()
+        loadAllImagesFrom(urls: self.urls) { [weak self] result in
+            switch result {
+            case .success(let photos):
+                self?.photos = photos
+                loader.stopAnimating()
+                self?.startViewsAnimation()
+            case .failure(let error):
+                print(error.localizedDescription)
+            }
+        }
+    }
+    
+    private func loadPhotosWithoutFreezingUI() {
+        for url in urls {
+            getImageFrom(url: url) { result in
+                switch result {
+                case .success(let image):
+                    self.photos.append(image)
+                case .failure(let error):
+                    print(error.localizedDescription)
+                }
+            }
+        }
+    }
 
 }
 
 
 // TODO: 1.- Implement a function that allows the app downloading the images without freezing the UI or causing it to work unexpected way
+func getImageFrom(url: URL, completion: @escaping (Result<UIImage, Error>) -> Void) {
+    DispatchQueue.global().async {
+        do  {
+            let data = try Data(contentsOf: url)
+            if let image = UIImage(data: data) {
+                completion(.success(image))
+            }
+        } catch let error {
+            completion(.failure(error))
+        }
+    }
+}
 
 // TODO: 2.- Implement a function that allows to fill the collection view only when all photos have been downloaded, adding an animation for waiting the completion of the task.
-
+func loadAllImagesFrom(urls: [URL], completion: @escaping (Result<[UIImage], Error>) -> Void) {
+    let dispatchGroup = DispatchGroup()
+    var photos: [UIImage] = []
+    for url in urls {
+        dispatchGroup.enter()
+        getImageFrom(url: url) { result in
+            switch result {
+            case .success(let image):
+                photos.append(image)
+                dispatchGroup.leave()
+            case .failure(let error):
+                completion(.failure(error))
+            }
+        }
+    }
+    
+    dispatchGroup.notify(queue: .main) {
+        completion(.success(photos))
+    }
+}
 
 // MARK: - UICollectionView DataSource, Delegate
 extension ViewController {
     override func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-        urls.count
+        photos.count
     }
     
     override func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         guard let cell = collectionView.dequeueReusableCell(withReuseIdentifier: Constants.cellID, for: indexPath) as? ImageCell else { return UICollectionViewCell() }
-        
-        let url = urls[indexPath.row]
-        let data = try? Data(contentsOf: url)
-        let image = UIImage(data: data!)
+        let image = self.photos[indexPath.row]
         cell.display(image)
-        
         return cell
     }
 }
